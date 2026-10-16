@@ -1,0 +1,15 @@
+{
+  "ads": {
+    "domains": ["nike.com", "adidas.com"],
+    "max_ads_per_domain": 20,
+    "country": "",
+    "max_charge_usd": 0.5
+  },
+  "jobs": {
+    "companies": ["stripe.com", "ramp.com"],
+    "state_id": "competitor-watchdog",
+    "title_keywords": [],
+    "max_charge_usd": 0.5
+  },
+  "max_total_usd_per_run": 1.0
+}

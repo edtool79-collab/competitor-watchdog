@@ -1,0 +1,37 @@
+name: competitor-watchdog
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # every day at 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: "Baseline run: do not post to Slack (use it once, right after setup)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run the watchdog
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          BASELINE: ${{ inputs.baseline }}
+        run: |
+          # Does nothing until you add watchdog.config.json, so a fresh copy never fails or spends money.
+          if [ ! -f watchdog.config.json ]; then echo "watchdog.config.json not found. Nothing to do."; exit 0; fi
+          if [ "$BASELINE" = "true" ]; then
+            python watchdog.py --config watchdog.config.json --baseline
+          else
+            python watchdog.py --config watchdog.config.json
+          fi
