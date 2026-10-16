@@ -105,6 +105,24 @@ class FormatTests(unittest.TestCase):
         self.assertEqual(watchdog.format_jobs(items), ["Jobs: no changes."])
 
 
+class OutputNoteTests(unittest.TestCase):
+    def test_capped_run_warns_with_counts(self):
+        text = " ".join(watchdog.format_ads([], {"outcome": "PARTIAL_SPENDING_LIMIT", "domains_checked": 10}, 25))
+        self.assertIn("10 of 25", text)
+        self.assertIn("max_charge_usd", text)
+
+    def test_free_plan_note(self):
+        text = " ".join(watchdog.format_ads(ADS_ITEMS, {"outcome": "FREE_PLAN_LIMITED"}, 1))
+        self.assertIn("free Apify plan", text)
+
+    def test_clean_run_has_no_notes(self):
+        self.assertEqual(watchdog.output_notes({"outcome": "COMPLETE"}, "Ads", 3), [])
+
+    def test_missing_summary_is_not_an_error(self):
+        with mock.patch.object(watchdog, "api", side_effect=RuntimeError("404")):
+            self.assertEqual(watchdog.read_output("t", {"defaultKeyValueStoreId": "s"}), {})
+
+
 class RunTests(unittest.TestCase):
     def setUp(self):
         self.cfg_path = write_cfg(GOOD)
@@ -134,6 +152,8 @@ class RunTests(unittest.TestCase):
             calls.append((method, path, params))
             if method == "POST":
                 return {"data": {"id": "run1", "status": "SUCCEEDED", "defaultDatasetId": "ds1"}}
+            if "records/OUTPUT" in path:
+                return {}
             return ADS_ITEMS if "ads" in calls[-2][1] else JOBS_ITEMS
 
         with mock.patch.object(watchdog, "api", side_effect=fake_api), mock.patch.object(watchdog, "post_slack") as slack:
@@ -150,7 +170,7 @@ class RunTests(unittest.TestCase):
         def fake_api(method, path, token, body=None, params=None):
             if method == "POST":
                 return {"data": {"id": "r", "status": "SUCCEEDED", "defaultDatasetId": "d"}}
-            return []
+            return {} if "records/OUTPUT" in path else []
 
         with mock.patch.object(watchdog, "api", side_effect=fake_api), mock.patch.object(watchdog, "post_slack") as slack:
             code, out, _ = self.run_main(["--config", str(self.cfg_path), "--baseline"],

@@ -95,7 +95,8 @@ def plan_text(cfg: dict) -> str:
                      f"${worst_case_ads_usd(cfg):.2f}.")
     if cfg["companies"]:
         lines.append(f"- Jobs: {len(cfg['companies'])} company(ies), only changes. Run cap ${cfg['jobs_cap']:.2f}. "
-                     "The price of this Actor is on its Apify page.")
+                     "The jobs Actor charges about $0.05 per company on every run (see its Apify page), so this is at most "
+                     f"${len(cfg['companies']) * 0.05:.2f} per run.")
     lines.append(f"- Total cap for the run: ${cfg['total_cap']:.2f}. The caps are enforced by Apify per run.")
     return "\n".join(lines)
 
@@ -132,7 +133,32 @@ def run_actor(token: str, actor: str, run_input: dict, cap_usd: float, timeout_s
     if run["status"] != "SUCCEEDED":
         raise RuntimeError(f"{actor}: run ended as {run['status']}. Open run {run['id']} in the Apify console.")
     items = api("GET", f"/datasets/{run['defaultDatasetId']}/items", token, params={"clean": "true", "format": "json"})
-    return items if isinstance(items, list) else []
+    return (items if isinstance(items, list) else []), read_output(token, run)
+
+
+def read_output(token: str, run: dict) -> dict:
+    """The run summary the Actor writes at the end. Best effort: a missing summary is not an error."""
+    store = run.get("defaultKeyValueStoreId")
+    if not store:
+        return {}
+    try:
+        out = api("GET", f"/key-value-stores/{store}/records/OUTPUT", token)
+    except RuntimeError:
+        return {}
+    return out if isinstance(out, dict) else {}
+
+
+def output_notes(output: dict, label: str, total: int) -> list[str]:
+    """Warnings the Actor reports in its own summary. A capped run skips items silently, so say so."""
+    notes = []
+    outcome = str(output.get("outcome", ""))
+    if "PARTIAL" in outcome:
+        checked = output.get("domains_checked") or output.get("companies_checked")
+        done = f"{checked} of {total}" if checked is not None else "only some"
+        notes.append(f"{label}: WARNING, the cost cap was reached, so {done} were checked. Raise max_charge_usd to cover the whole list.")
+    if "FREE_PLAN" in outcome:
+        notes.append(f"{label}: the free Apify plan limits this Actor, so results are a small preview and the same items can repeat every day. A paid plan removes the limit.")
+    return notes
 
 
 def ads_input(cfg: dict) -> dict:
@@ -150,10 +176,11 @@ def jobs_input(cfg: dict) -> dict:
     return run_input
 
 
-def format_ads(items: list[dict]) -> list[str]:
+def format_ads(items: list[dict], output: dict | None = None, total: int = 0) -> list[str]:
+    notes = output_notes(output or {}, "Ads", total)
     ads = [i for i in items if i.get("ad_id")]
     if not ads:
-        return ["Ads: no new ads."]
+        return ["Ads: no new ads."] + notes
     by_domain: dict[str, list[dict]] = {}
     for ad in ads:
         by_domain.setdefault(ad.get("domain", "?"), []).append(ad)
@@ -165,10 +192,11 @@ def format_ads(items: list[dict]) -> list[str]:
             lines.append(f"  - {ad.get('advertiser_name', 'unknown advertiser')}, {ad.get('format', '?')}, first shown {when}: {ad.get('transparency_url', '')}")
         if len(group) > 10:
             lines.append(f"  - and {len(group) - 10} more")
-    return lines
+    return lines + notes
 
 
-def format_jobs(items: list[dict]) -> list[str]:
+def format_jobs(items: list[dict], output: dict | None = None, total: int = 0) -> list[str]:
+    notes = output_notes(output or {}, "Jobs", total)
     summaries = [i for i in items if i.get("record_type") == "company_summary"]
     jobs = [i for i in items if i.get("record_type") == "job"]
     lines = []
@@ -187,7 +215,7 @@ def format_jobs(items: list[dict]) -> list[str]:
             lines.append(f"  - NEW: {job.get('title', '?')}{where}: {job.get('apply_url', '')}")
         for title in (s.get("closed_job_titles") or [])[:5]:
             lines.append(f"  - closed: {title}")
-    return lines or ["Jobs: no changes."]
+    return (lines or ["Jobs: no changes."]) + notes
 
 
 def post_slack(webhook: str, text: str) -> None:
@@ -221,14 +249,15 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     lines, failed = [], False
-    for name, enabled, actor, run_input, cap, fmt in (
-        ("ads", bool(cfg["ads_domains"]), ADS_ACTOR, ads_input(cfg), cfg["ads_cap"], format_ads),
-        ("jobs", bool(cfg["companies"]), JOBS_ACTOR, jobs_input(cfg), cfg["jobs_cap"], format_jobs),
+    for name, enabled, actor, run_input, cap, fmt, total in (
+        ("ads", bool(cfg["ads_domains"]), ADS_ACTOR, ads_input(cfg), cfg["ads_cap"], format_ads, len(cfg["ads_domains"])),
+        ("jobs", bool(cfg["companies"]), JOBS_ACTOR, jobs_input(cfg), cfg["jobs_cap"], format_jobs, len(cfg["companies"])),
     ):
         if not enabled:
             continue
         try:
-            lines += fmt(run_actor(token, actor, run_input, cap))
+            items, output = run_actor(token, actor, run_input, cap)
+            lines += fmt(items, output, total)
         except RuntimeError as exc:
             failed = True
             lines.append(f"{name}: FAILED. {exc}")

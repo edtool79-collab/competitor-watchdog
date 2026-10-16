@@ -14,14 +14,15 @@ It posts a short summary to Slack and to the run's summary page in GitHub. It us
 
 You pay Apify directly, per result. Nothing runs outside your account.
 
-- **Ads:** $0.005 per domain checked + $0.0015 per ad returned. The first run returns the most recent ads of every domain, so it is the most expensive. With 10 domains and 20 ads per domain, the most it can cost by these rates is 10 x $0.005 + 10 x 20 x $0.0015 = $0.35. Later runs return only ads that are new, but each domain is still checked and billed.
-- **Jobs:** see the price on the Actor's [Apify page](https://apify.com/hirepulse/ats-job-pulse).
-- **Free Apify plan:** the ads Actor gives a free preview of 1 domain and up to 5 ads. It is enough to see the output, not to run a daily watchlist.
+- **Ads:** $0.005 per domain checked + $0.0015 per ad returned. The first run returns the most recent ads of every domain, so it is the most expensive. With 10 domains and 20 ads per domain, the most it can cost by these rates is 10 x $0.005 + 10 x 20 x $0.0015 = $0.35. Later runs return only ads that are new. A domain that has no ads costs nothing, and a domain that has ads is still checked and billed every run.
+- **Jobs:** about $0.05 per company on every run, whether or not anything changed (see the Actor's [Apify page](https://apify.com/hirepulse/ats-job-pulse)). That is about $3 a month for 2 companies, and about $37.50 a month for 25.
+- **Free Apify plan:** the ads Actor gives a free preview of 1 domain and up to 5 ads. On the free plan the same few ads can come back every day as "new", and the summary says so. It is enough to see the output, not to run a daily watchlist.
 
 Limits built into the script:
 
 - Every Actor run gets a hard cost cap (`max_charge_usd`), enforced by Apify. The script refuses to start if the caps add up to more than `max_total_usd_per_run`.
 - At most 25 domains and 25 companies per run.
+- If the cost cap is too low for the list, Apify skips the rest silently. The script reads the Actor's run summary and prints a warning such as "10 of 25 were checked, raise max_charge_usd", instead of saying "no changes". Check the caps against the list: 25 companies at $0.05 need more than the default $0.50.
 - A failed run is reported and **never retried**, because a retry would be billed again.
 - `python watchdog.py --dry-run` checks your config and prints the plan and the largest possible price. It calls nothing.
 
